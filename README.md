@@ -7,7 +7,7 @@ sdk: docker
 app_port: 7860
 pinned: false
 license: mit
-short_description: Автономный агент для поиска AI-вакансий на hh.ru с анализом через LLM
+short_description: AI-агент для поиска вакансий на hh.ru
 ---
 
 # AI Job Hunter Agent

@@ -64,8 +64,7 @@ ai_job_hunter/
 flowchart TD
     A[hh.ru HTML] --> B[searcher.py\nПарсинг + фильтрация]
     B -->|Vacancy objects| C{Фильтры}
-    C -->|убрать Senior/Lead| D[analyzer.py\nLLM оценка]
-    C -->|убрать мусор| D
+    C -->|убрать мусор| D[analyzer.py\nLLM оценка]
     D -->|score 0-100\nAPPLY/MAYBE/SKIP| E[session.json]
     E --> F[resume_adapter.py\nАдаптация резюме]
     E --> G[cover_letter.py\nПисьмо]

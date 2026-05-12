@@ -310,6 +310,142 @@ class Exporter:
         pdf.cell(0, 7, f"  {title}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
+    def _init_pdf_fonts(self, pdf) -> str:
+        """Инициализирует шрифты PDF с поддержкой кириллицы. Возвращает имя шрифта."""
+        import os
+        arial_path = r"C:\Windows\Fonts\arial.ttf"
+        arial_bold_path = r"C:\Windows\Fonts\arialbd.ttf"
+        if os.path.exists(arial_path):
+            pdf.add_font("Arial", "", arial_path)
+            pdf.add_font("Arial", "B", arial_bold_path)
+            return "Arial"
+        return "Helvetica"
+
+    def export_cover_letter_pdf(self, letter: str, analysis: "VacancyAnalysis", filename: str = None) -> Optional[Path]:
+        """
+        Экспортирует сопроводительное письмо в PDF.
+        """
+        try:
+            from fpdf import FPDF, XPos, YPos
+        except ImportError:
+            print("[PDF] fpdf2 не установлен.")
+            return None
+
+        if not filename:
+            company = analysis.company.replace(" ", "_")[:20]
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            filename = f"cover_{company}_{ts}.pdf"
+
+        pdf = FPDF()
+        pdf.add_page()
+        font_name = self._init_pdf_fonts(pdf)
+
+        # Заголовок
+        pdf.set_font(font_name, "B", 16)
+        pdf.cell(0, 10, "Сопроводительное письмо", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+        pdf.ln(2)
+
+        # Метаданные
+        pdf.set_font(font_name, "", 10)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(0, 6, f"  Вакансия: {analysis.vacancy_title} | Компания: {analysis.company} | Score: {analysis.relevance_score}/100",
+                 fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"  Дата: {datetime.now().strftime('%d.%m.%Y')}",
+                 fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(5)
+
+        # Текст письма
+        pdf.set_font(font_name, "", 11)
+        pdf.set_draw_color(100, 100, 100)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(4)
+        pdf.multi_cell(0, 6, letter)
+
+        path = config.OUTPUT_DIR / filename
+        pdf.output(str(path))
+        print(f"[PDF] Письмо сохранено: {path}")
+        return path
+
+    def export_analysis_pdf(self, analyses: list["VacancyAnalysis"], filename: str = None) -> Optional[Path]:
+        """
+        Экспортирует итоговый отчёт по вакансиям в PDF.
+        """
+        try:
+            from fpdf import FPDF, XPos, YPos
+        except ImportError:
+            print("[PDF] fpdf2 не установлен.")
+            return None
+
+        if not filename:
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            filename = f"report_{ts}.pdf"
+
+        pdf = FPDF()
+        pdf.add_page()
+        font_name = self._init_pdf_fonts(pdf)
+
+        # Заголовок
+        pdf.set_font(font_name, "B", 16)
+        pdf.cell(0, 10, "AI Job Hunter — Отчёт по вакансиям", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+        pdf.ln(2)
+
+        # Сводка
+        apply  = [a for a in analyses if a.recommendation == "APPLY"]
+        maybe  = [a for a in analyses if a.recommendation == "MAYBE"]
+        skip   = [a for a in analyses if a.recommendation == "SKIP"]
+
+        pdf.set_font(font_name, "", 10)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(0, 6, f"  Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')} | "
+                       f"Всего: {len(analyses)} | APPLY: {len(apply)} | MAYBE: {len(maybe)} | SKIP: {len(skip)}",
+                 fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(4)
+
+        rec_labels = {"APPLY": "APPLY", "MAYBE": "MAYBE", "SKIP": "SKIP"}
+        rec_colors = {
+            "APPLY": (0, 150, 0),
+            "MAYBE": (200, 130, 0),
+            "SKIP":  (180, 0, 0),
+        }
+
+        for a in analyses:
+            # Новая страница если мало места
+            if pdf.get_y() > 250:
+                pdf.add_page()
+
+            # Название вакансии
+            pdf.set_font(font_name, "B", 11)
+            color = rec_colors.get(a.recommendation, (0, 0, 0))
+            pdf.set_text_color(*color)
+            label = rec_labels.get(a.recommendation, a.recommendation)
+            pdf.cell(0, 7, f"[{label}] {a.vacancy_title} — {a.company}",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(0, 0, 0)
+
+            # Оценка и вывод
+            pdf.set_font(font_name, "", 9)
+            pdf.cell(0, 5, f"Score: {a.relevance_score}/100 | {a.match_level} | hh.ru/vacancy/{a.vacancy_id}",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(0, 4, a.reasoning)
+
+            # Совпадения
+            if a.matching_skills:
+                pdf.set_font(font_name, "B", 9)
+                pdf.cell(25, 4, "Совпадает:")
+                pdf.set_font(font_name, "", 9)
+                pdf.cell(0, 4, ", ".join(a.matching_skills[:4]),
+                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+            pdf.ln(3)
+            pdf.set_draw_color(200, 200, 200)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(3)
+
+        path = config.OUTPUT_DIR / filename
+        pdf.output(str(path))
+        print(f"[PDF] Отчёт сохранён: {path}")
+        return path
+
 
 # ─── Тест ────────────────────────────────────────────────────────────────────
 

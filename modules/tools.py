@@ -75,24 +75,65 @@ def _get_exporter() -> Exporter:
 @tool
 def search_vacancies(query: str) -> str:
     """
-    Ищет вакансии на hh.ru по заданному запросу.
+    Ищет вакансии на hh.ru И Habr Career по заданному запросу.
     Аргумент: строка поискового запроса, например "prompt engineer" или "AI engineer".
+    Автоматически расширяет поиск до 3-5 связанных запросов и агрегирует
+    уникальные результаты с обоих источников — это значительно увеличивает охват.
     Возвращает: краткий список найденных вакансий с названием и компанией.
     """
     try:
         searcher = _get_searcher()
-        vacancies = searcher.search_hh(query, pages=2)
+
+        # Составляем список запросов: пользовательский + близкие из пресета AI/ML
+        AI_RELATED_QUERIES = [
+            "prompt engineer",
+            "LLM engineer",
+            "AI engineer",
+            "AI trainer",
+            "NLP engineer",
+            "LLM developer",
+            "AI автоматизация",
+            "conversational AI",
+        ]
+
+        query_lower = query.lower().strip()
+        related = [q for q in AI_RELATED_QUERIES if q.lower() != query_lower]
+        queries_to_run = [query] + related[:3]
+
+        # Агрегируем результаты по всем запросам с обоих источников
+        seen_ids: dict[str, object] = {}
+
+        for q in queries_to_run:
+            # hh.ru
+            for v in searcher.search_hh(q, pages=3):
+                if v.id not in seen_ids:
+                    seen_ids[v.id] = v
+            # Habr Career
+            for v in searcher.search_habr(q, pages=2):
+                if v.id not in seen_ids:
+                    seen_ids[v.id] = v
+
+        vacancies = list(seen_ids.values())
+
         if not vacancies:
-            return f"Вакансии по запросу '{query}' не найдены."
+            return f"Вакансии по запросу '{query}' (и связанным запросам) не найдены."
 
         _session["vacancies"] = vacancies
-        _session["analyses"] = []  # сбрасываем анализы при новом поиске
+        _session["analyses"] = []
 
-        lines = [f"Найдено {len(vacancies)} вакансий по запросу '{query}':\n"]
-        for i, v in enumerate(vacancies[:15], 1):
-            lines.append(f"{i}. {v.title} | {v.company} | {v.salary_str()}")
-        if len(vacancies) > 15:
-            lines.append(f"... ещё {len(vacancies) - 15} вакансий")
+        hh_count = sum(1 for v in vacancies if v.source == "hh.ru")
+        habr_count = sum(1 for v in vacancies if v.source == "habr.career")
+
+        lines = [
+            f"Найдено {len(vacancies)} уникальных вакансий "
+            f"(hh.ru: {hh_count}, Habr Career: {habr_count}) "
+            f"по запросам: {', '.join(queries_to_run)}\n"
+        ]
+        for i, v in enumerate(vacancies[:20], 1):
+            source_tag = "[H]" if v.source == "habr.career" else "[hh]"
+            lines.append(f"{i}. {source_tag} {v.title} | {v.company} | {v.salary_str()}")
+        if len(vacancies) > 20:
+            lines.append(f"... ещё {len(vacancies) - 20} вакансий")
         return "\n".join(lines)
     except Exception as e:
         return f"Ошибка поиска: {e}"

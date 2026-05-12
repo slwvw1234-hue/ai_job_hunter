@@ -206,24 +206,54 @@ class VacancyAnalyzer:
     def _parse_json_response(self, text: str) -> Optional[dict]:
         """
         Парсит JSON из ответа модели.
-        Модель иногда оборачивает JSON в ```json ... ``` — убираем это.
+        Модель иногда оборачивает JSON в ```json ... ``` или добавляет текст после —
+        извлекаем первый полный JSON-объект по балансу фигурных скобок.
         """
         # Убираем markdown-блоки если есть
         text = re.sub(r"```json\s*", "", text)
         text = re.sub(r"```\s*", "", text)
         text = text.strip()
 
+        # Сначала пробуем напрямую
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Пытаемся найти JSON-объект внутри текста
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group())
-                except json.JSONDecodeError:
-                    pass
+            pass
+
+        # Извлекаем первый полный JSON-объект по балансу скобок
+        start = text.find("{")
+        if start == -1:
             return None
+
+        depth = 0
+        in_string = False
+        escape_next = False
+
+        for i, ch in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\" and in_string:
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        pass
+                    break
+
+        return None
 
     def analyze_batch(self, vacancies: list[Vacancy]) -> list[VacancyAnalysis]:
         """

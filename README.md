@@ -15,7 +15,7 @@ short_description: AI-агент для поиска вакансий на hh.ru
 > Автономный Python-агент для поиска AI-вакансий на hh.ru, анализа через LLM и адаптации резюме под каждую позицию.
 
 **Автор:** Слава · [@ysiSevera](https://t.me/ysiSevera)  
-**Стек:** Python 3.11 · OpenAI API · Streamlit · BeautifulSoup · Pydantic · fpdf2 · Docker
+**Стек:** Python 3.x · LangGraph · LangChain · OpenAI API · Streamlit · BeautifulSoup · Pydantic · fpdf2
 
 ![CI](https://github.com/slwvw1234-hue/ai_job_hunter/actions/workflows/ci.yml/badge.svg)
 
@@ -23,15 +23,32 @@ short_description: AI-агент для поиска вакансий на hh.ru
 
 ## Что умеет агент
 
+### Автономный режим `/auto` (рекомендуется)
+
+Одна команда — полный цикл без участия человека:
+
+```
+agent> /auto prompt engineer
+```
+
+Агент (LangGraph ReAct) самостоятельно:
+1. Ищет вакансии на hh.ru
+2. Анализирует их через LLM (score 0–100, APPLY/MAYBE/SKIP)
+3. Адаптирует резюме под лучшую вакансию
+4. Генерирует сопроводительное письмо
+5. Создаёт итоговый Markdown-отчёт
+6. Экспортирует **PDF-пакет** (отчёт + резюме + письмо)
+
+### Ручные команды CLI
+
 | Команда | Что делает |
 |---------|-----------|
-| `/search` | Парсит **hh.ru и Habr Career** по запросам выбранной профессии, фильтрует мусор и Senior-вакансии, дедуплицирует |
-| `/analyze [N]` | Анализирует N вакансий через LLM: score 0–100, APPLY / MAYBE / SKIP |
-| `/adapt N` | Адаптирует резюме под конкретную вакансию (без придумывания фактов) |
-| `/cover N [тон]` | Генерирует персонализированное сопроводительное письмо (professional / friendly / concise) |
+| `/search` | Парсит hh.ru по запросам выбранной профессии |
+| `/analyze [N]` | Анализирует N вакансий: score 0–100, APPLY / MAYBE / SKIP |
+| `/adapt N` | Адаптирует резюме под конкретную вакансию |
+| `/cover N [тон]` | Сопроводительное письмо (professional / friendly / concise) |
 | `/resume N` | Экспортирует адаптированное резюме в Markdown и PDF |
-| `/report` | Создаёт общий Markdown-отчёт по всем проанализированным вакансиям |
-| `/run [запрос]` | Полный цикл одной командой: search → analyze → report |
+| `/report` | Создаёт Markdown-отчёт по всем проанализированным вакансиям |
 | `/open N` | Открывает вакансию в браузере |
 | `/list [фильтр]` | Список вакансий: `apply`, `maybe`, `skip`, `top5`, `all` |
 
@@ -41,49 +58,45 @@ short_description: AI-агент для поиска вакансий на hh.ru
 
 ```
 ai_job_hunter/
-├── app.py                # Streamlit веб-интерфейс (5 страниц)
-├── agent.py              # CLI-интерфейс, точка входа, все команды
-├── config.py             # Настройки, загрузка .env, пресеты профессий
-├── Dockerfile            # Docker-образ для деплоя
-├── run.bat               # Запуск CLI (двойной клик)
-├── run_web.bat           # Запуск веб-интерфейса (двойной клик)
+├── app.py                      # Streamlit веб-интерфейс
+├── agent.py                    # CLI-интерфейс, точка входа, все команды
+├── config.py                   # Настройки, загрузка .env
+├── run.bat                     # Запуск CLI (двойной клик)
+├── run_web.bat                 # Запуск веб-интерфейса (двойной клик)
 ├── memory/
-│   └── base_resume.json  # Долгосрочная память — базовое резюме кандидата
+│   └── base_resume.json        # Долгосрочная память — базовое резюме v2.0
 ├── modules/
-│   ├── searcher.py       # Парсинг hh.ru и Habr Career, фильтрация
-│   ├── analyzer.py       # Анализ вакансий через LLM, скоринг
-│   ├── resume_adapter.py # Адаптация резюме под вакансию
-│   ├── cover_letter.py   # Генерация сопроводительных писем
-│   ├── exporter.py       # Экспорт в Markdown / PDF
-│   ├── evaluator.py      # Фидбэк и метрики качества рекомендаций
-│   └── llm_client.py     # LLM клиент, fallback, exponential backoff
+│   ├── autonomous_agent.py     # LangGraph ReAct-агент (/auto)
+│   ├── tools.py                # 7 LangChain @tool инструментов
+│   ├── searcher.py             # Парсинг hh.ru, фильтрация
+│   ├── analyzer.py             # Анализ вакансий через LLM, скоринг
+│   ├── resume_adapter.py       # Адаптация резюме под вакансию
+│   ├── cover_letter.py         # Генерация сопроводительных писем
+│   └── exporter.py             # Экспорт в Markdown + PDF (3 типа)
 ├── tests/
-│   ├── test_searcher.py  # Тесты парсинга и фильтрации
-│   └── test_evaluator.py # Тесты метрик
-├── output/               # Результаты работы агента (gitignored)
-├── .env.example          # Шаблон переменных окружения
+│   ├── test_searcher.py
+│   └── test_evaluator.py
+├── output/                     # Результаты работы агента (gitignored)
+├── .env.example
 └── requirements.txt
 ```
 
-### Как это работает
+### Как это работает (автономный режим)
 
 ```mermaid
 flowchart TD
-    A[hh.ru HTML] --> B[searcher.py\nПарсинг + фильтрация]
-    A2[Habr Career HTML] --> B
-    B -->|Vacancy objects| C{Фильтры}
-    C -->|убрать мусор| D[analyzer.py\nLLM оценка]
-    D -->|score 0-100\nAPPLY/MAYBE/SKIP| E[session.json]
-    E --> F[resume_adapter.py\nАдаптация резюме]
-    E --> G[cover_letter.py\nПисьмо]
-    F --> H[exporter.py\nMD + PDF]
-    G --> H
-    H --> I[output/]
+    U["/auto запрос"] --> A[LangGraph ReAct Agent]
+    A --> B[search_vacancies\nhh.ru парсинг]
+    B --> C[analyze_vacancies\nLLM score + APPLY/MAYBE/SKIP]
+    C --> D[adapt_resume\nАдаптация резюме]
+    D --> E[generate_cover_letter\nСопроводительное письмо]
+    E --> F[export_report\nMarkdown отчёт]
+    F --> G[export_all_pdf\nPDF пакет]
+    G --> H[output/\nотчёт + резюме + письмо]
 
-    style A fill:#313244,color:#cdd6f4
-    style A2 fill:#313244,color:#cdd6f4
-    style D fill:#1e66f5,color:#fff
-    style H fill:#40a02b,color:#fff
+    style A fill:#1e66f5,color:#fff
+    style G fill:#40a02b,color:#fff
+    style H fill:#313244,color:#cdd6f4
 ```
 
 ---
@@ -177,53 +190,39 @@ docker run -p 7860:7860 \
 ## Пример сессии
 
 ```
-agent> /run
-[ПОИСК] hh.ru по 11 запросам...
-[ИТОГО] 87 уникальных вакансий
+agent> /auto prompt engineer
 
-[АНАЛИЗ] 20 вакансий через gpt-4o-mini...
-  Score: 78 | APPLY  — AI Automation Engineer
-  Score: 71 | APPLY  — LLM/Agent Engineer
-  Score: 65 | MAYBE  — ML-инженер в стартап
-  ...
+[AUTO AGENT] Запускаю автономный поиск: 'prompt engineer'
+  [TOOL] search_vacancies → Найдено 31 вакансий
+  [TOOL] analyze_vacancies → Прошли порог: 5 из 10
+  [TOOL] adapt_resume → Резюме адаптировано под: AI Python Engineer
+  [TOOL] generate_cover_letter → Письмо готово
+  [TOOL] export_report → output/report_20260512_1638.md
+  [TOOL] export_all_pdf → PDF-пакет готов:
+      Отчёт:  output/report_20260512_1638.pdf
+      Резюме: output/resume_ОООТД_ГраСС_20260512_1638.pdf
+      Письмо: output/cover_ОООТД_ГраСС_20260512_1638.pdf
 
-agent> /adapt 1
-Адаптирую резюме под: AI Automation Engineer...
-
-agent> /cover 1 friendly
-Генерирую письмо (тон: friendly)...
-
-agent> /resume 1
-[PDF] output/resume_20260511_...pdf
+Топ-3 вакансии:
+1. AI Python Engineer | Score: 45 | MAYBE
+2. AI Engineer (ОТП Банк) | Score: 45 | MAYBE
+3. Prompt Engineer (open-source LLM) | Score: 45 | MAYBE
 ```
 
 ---
 
 ## Настройки
 
-### Пресеты профессий
-
-В веб-интерфейсе выбирается прямо в UI. Для CLI — через `.env`:
+### `.env` переменные
 
 ```env
-PROFESSION_PRESET=AI/ML Engineer   # по умолчанию
-PROFESSION_PRESET=Python Developer
-PROFESSION_PRESET=Data Analyst
-PROFESSION_PRESET=Frontend Developer
+OPENAI_API_KEY=sk-...        # OpenAI ключ
+LLM_MODEL=gpt-4o-mini        # Модель (gpt-4o-mini рекомендуется)
+SEARCH_AREA=113               # 113 = вся Россия, 1 = Москва
+RELEVANCE_THRESHOLD=45        # Минимальный score для включения в отчёт
 ```
 
-Каждый пресет содержит 6–11 поисковых запросов под соответствующую профессию.
-Добавить свой пресет можно в `config.py` → `PROFESSION_PRESETS`.
-
-### Веб-интерфейс: страницы
-
-| Страница | Что делает |
-|----------|-----------|
-| 🔍 Поиск | Поиск на hh.ru + Habr Career, фильтр по зарплате, скрыть виденные |
-| 📊 Анализ | LLM-оценка вакансий, фильтр по APPLY/MAYBE/SKIP |
-| 📝 Резюме и письма | Адаптация резюме, генерация письма, скачать PDF |
-| 📄 Отчёт | Сводная статистика, скачать Markdown-отчёт |
-| 📈 Оценка агента | Записывай реальные исходы, смотри Precision / Invite Rate / Accuracy |
+Получить ключ OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
 ---
 
@@ -231,8 +230,10 @@ PROFESSION_PRESET=Frontend Developer
 
 | Библиотека | Назначение |
 |------------|-----------|
-| `requests` + `urllib3` | HTTP-запросы, поддержка прокси |
-| `beautifulsoup4` + `lxml` | Парсинг hh.ru и Habr Career |
+| `langchain` + `langgraph` | ReAct-агент, @tool инструменты |
+| `langchain-openai` | ChatOpenAI интеграция |
+| `requests` + `urllib3` | HTTP-запросы |
+| `beautifulsoup4` + `lxml` | Парсинг hh.ru |
 | `pydantic` | Валидация и структуры данных |
 | `python-dotenv` | Загрузка .env |
 | `fpdf2` | Генерация PDF |
@@ -243,20 +244,15 @@ PROFESSION_PRESET=Frontend Developer
 ## Roadmap
 
 - [x] Парсинг hh.ru с фильтрацией Senior/мусора
-- [x] Парсинг Habr Career
-- [x] Анализ через LLM (OpenAI / OpenRouter)
+- [x] Анализ через LLM (OpenAI)
 - [x] Адаптация резюме под вакансию
 - [x] Генерация сопроводительных писем
-- [x] Экспорт в PDF
-- [x] Сохранение сессии между запусками
-- [x] Streamlit веб-интерфейс (5 страниц)
-- [x] Docker-образ
-- [x] Универсальный режим (4 пресета профессий)
-- [x] Фильтр по зарплате
-- [x] Дедупликация между сессиями
-- [x] Evaluation pipeline (Precision, Invite Rate, Accuracy)
-- [x] GitHub Actions CI (линтер + тесты)
-- [x] Деплой на Hugging Face Spaces
+- [x] Экспорт в PDF (резюме + письмо + отчёт)
+- [x] Streamlit веб-интерфейс
+- [x] **LangGraph ReAct-агент (`/auto`) — полный цикл одной командой**
+- [x] **7 LangChain @tool инструментов**
+- [x] **PDF-пакет: три документа автоматически**
+- [ ] Парсинг Habr Career
 - [ ] Демо-видео / GIF
 
 ---
@@ -265,10 +261,11 @@ PROFESSION_PRESET=Frontend Developer
 
 Демонстрирует:
 
+- **LangGraph / LangChain** — ReAct-агент, @tool инструменты, create_react_agent
 - **Prompt Engineering** — многоэтапные промпты, JSON-first, anti-hallucination, управление температурой
-- **LLM API** — OpenAI-совместимая интеграция, exponential backoff при rate limit, fallback между моделями
-- **Python** — модульная архитектура, Pydantic-валидация, веб-скрапинг
-- **Системное мышление** — пайплайн поиск → фильтрация → анализ → адаптация → экспорт
+- **LLM API** — OpenAI-совместимая интеграция, ChatOpenAI, структурированный вывод через Pydantic
+- **Python** — модульная архитектура, Pydantic-валидация, веб-скрапинг, PDF-генерация
+- **Системное мышление** — пайплайн поиск → анализ → адаптация → PDF-пакет
 
 ---
 

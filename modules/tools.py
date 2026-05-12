@@ -225,6 +225,63 @@ def export_report(format: str = "md") -> str:
 
 
 @tool
+def export_all_pdf() -> str:
+    """
+    Создаёт три PDF-файла по результатам текущей сессии:
+      1. Отчёт по вакансиям (report_*.pdf)
+      2. Адаптированное резюме (resume_*.pdf) — если было адаптировано
+      3. Сопроводительное письмо (cover_*.pdf) — если было сгенерировано
+    Вызывай в самом конце, после export_report, adapt_resume и generate_cover_letter.
+    Возвращает пути к созданным PDF-файлам.
+    """
+    try:
+        analyses = _session.get("analyses", [])
+        adapted_map = _session.get("adapted", {})
+        exporter = _get_exporter()
+        results = []
+
+        # 1. Отчёт по вакансиям
+        if analyses:
+            path = exporter.export_analysis_pdf(analyses)
+            if path:
+                results.append(f"Отчёт:  {path}")
+        else:
+            results.append("Отчёт: нет данных (сначала выполни analyze_vacancies)")
+
+        # 2. Резюме — берём первое адаптированное
+        if adapted_map:
+            adapted = next(iter(adapted_map.values()))
+            path = exporter.export_resume_pdf(adapted)
+            if path:
+                results.append(f"Резюме: {path}")
+        else:
+            results.append("Резюме: не адаптировано (сначала выполни adapt_resume)")
+
+        # 3. Сопроводительное письмо — читаем из сохранённого MD-файла
+        cover_path = None
+        if adapted_map and analyses:
+            # Ищем последний сохранённый .md файл письма
+            import config as _cfg
+            cover_files = sorted(_cfg.OUTPUT_DIR.glob("cover_*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if cover_files:
+                letter_text = cover_files[0].read_text(encoding="utf-8")
+                # Берём анализ для самого лучшего адаптированного
+                best_id = next(iter(adapted_map))
+                best_analysis = next((a for a in analyses if a.vacancy_id == best_id), analyses[0])
+                path = exporter.export_cover_letter_pdf(letter_text, best_analysis)
+                if path:
+                    results.append(f"Письмо: {path}")
+            else:
+                results.append("Письмо: MD-файл не найден")
+        else:
+            results.append("Письмо: нет данных")
+
+        return "PDF-пакет готов:\n" + "\n".join(results)
+    except Exception as e:
+        return f"Ошибка генерации PDF: {e}"
+
+
+@tool
 def get_session_state() -> str:
     """
     Возвращает текущее состояние сессии: количество найденных вакансий,
@@ -254,5 +311,6 @@ ALL_TOOLS = [
     adapt_resume,
     generate_cover_letter,
     export_report,
+    export_all_pdf,
     get_session_state,
 ]

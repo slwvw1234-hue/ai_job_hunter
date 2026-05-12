@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 autonomous_agent.py — автономный ReAct-агент на LangGraph.
 

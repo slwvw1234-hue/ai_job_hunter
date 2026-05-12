@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 searcher.py вЂ” РјРѕРґСѓР»СЊ РїРѕРёСЃРєР° РІР°РєР°РЅСЃРёР№
 РСЃС‚РѕС‡РЅРёРєРё: hh.ru (web scraping), Habr Career (web scraping)

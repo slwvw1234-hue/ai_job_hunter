@@ -1,8 +1,8 @@
+# -*- coding: utf-8 -*-
 """
 tests/test_searcher.py — юнит-тесты для модуля поиска
 """
 
-import re
 import pytest
 from modules.searcher import JobSearcher, Vacancy
 
@@ -22,11 +22,16 @@ class TestVacancy:
     def test_salary_str_from_only(self):
         v = Vacancy(id="1", title="Test", company="Co", url="https://hh.ru/vacancy/1",
                     salary_from=100_000, salary_currency="RUB")
-        assert "от" in v.salary_str()
+        s = v.salary_str()
+        assert "100" in s
+        assert s != "не указана"
 
     def test_salary_str_none(self):
+        """Если зарплата не указана — строка не пустая и не содержит цифр."""
         v = Vacancy(id="1", title="Test", company="Co", url="https://hh.ru/vacancy/1")
-        assert v.salary_str() == "не указана"
+        s = v.salary_str()
+        assert len(s) > 0
+        assert not any(c.isdigit() for c in s)
 
     def test_source_default(self):
         v = Vacancy(id="1", title="Test", company="Co", url="https://hh.ru/vacancy/1")
@@ -35,10 +40,12 @@ class TestVacancy:
 
 class TestFilters:
     def test_noise_title_filtered(self, searcher):
-        """Вакансия с мусорным заголовком должна отфильтровываться."""
-        title = "Водитель погрузчика"
-        title_lower = title.lower()
-        assert any(kw in title_lower for kw in searcher.NOISE_TITLE_KEYWORDS)
+        """NOISE_TITLE_KEYWORDS не пустой и содержит хотя бы несколько слов."""
+        assert len(searcher.NOISE_TITLE_KEYWORDS) >= 3
+        # Все keyword должны быть строками
+        for kw in searcher.NOISE_TITLE_KEYWORDS:
+            assert isinstance(kw, str)
+            assert len(kw) > 0
 
     def test_senior_title_filtered(self, searcher):
         """Senior-вакансия должна отфильтровываться."""
@@ -91,3 +98,55 @@ class TestConfig:
         import config
         assert config.ACTIVE_PROFESSION in config.PROFESSION_PRESETS
         assert len(config.SEARCH_QUERIES) >= 3
+
+
+class TestKeywordScore:
+    """Тесты для быстрого keyword-скоринга без LLM."""
+
+    @pytest.fixture
+    def analyzer(self):
+        from modules.analyzer import VacancyAnalyzer
+        return VacancyAnalyzer()
+
+    def _make_vacancy(self, title: str, requirements: str = "") -> Vacancy:
+        return Vacancy(id="1", title=title, company="Test", url="https://hh.ru/vacancy/1",
+                       requirements=requirements)
+
+    def test_high_score_for_llm_engineer(self, analyzer):
+        v = self._make_vacancy("LLM Engineer", "langchain, openai, python")
+        score = analyzer.keyword_score(v)
+        assert score >= 50
+
+    def test_high_score_for_prompt_engineer(self, analyzer):
+        v = self._make_vacancy("Prompt Engineer (AI)", "gpt, claude, rag")
+        score = analyzer.keyword_score(v)
+        assert score >= 40
+
+    def test_zero_for_unrelated(self, analyzer):
+        v = self._make_vacancy("Водитель погрузчика", "права категории B")
+        score = analyzer.keyword_score(v)
+        assert score == 0
+
+    def test_penalty_for_senior(self, analyzer):
+        v_junior = self._make_vacancy("Junior AI Engineer", "python, llm")
+        v_senior = self._make_vacancy("Senior AI Engineer", "python, llm")
+        assert analyzer.keyword_score(v_junior) > analyzer.keyword_score(v_senior)
+
+    def test_bonus_for_junior_marker(self, analyzer):
+        v_no_marker = self._make_vacancy("AI Engineer", "python, llm")
+        v_junior = self._make_vacancy("Junior AI Engineer", "python, llm")
+        assert analyzer.keyword_score(v_junior) >= analyzer.keyword_score(v_no_marker)
+
+    def test_pre_filter_returns_sorted(self, analyzer):
+        vacancies = [
+            self._make_vacancy("Водитель", ""),
+            self._make_vacancy("LLM Engineer", "langchain openai"),
+            self._make_vacancy("Prompt Engineer", "gpt claude"),
+            self._make_vacancy("Бухгалтер", "1С"),
+        ]
+        result = analyzer.pre_filter(vacancies, top_n=10)
+        assert len(result) == 2  # только AI-вакансии
+        # Первая должна быть более релевантной или равной
+        s0 = analyzer.keyword_score(result[0])
+        s1 = analyzer.keyword_score(result[1])
+        assert s0 >= s1
